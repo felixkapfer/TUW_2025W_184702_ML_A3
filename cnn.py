@@ -367,7 +367,7 @@ def get_model(dataset, num_filters=32, dropout=0.5, compile_model=True):
     model = CNN(in_channels=in_channels, num_classes=10, 
                 num_filters=num_filters, dropout=dropout)
     
-    # torch.compile for PyTorch 2.0+ (significant speedup)
+    # torch.compile for PyTorch 2.0+ (used for speedup)
     if compile_model and hasattr(torch, 'compile'):
         try:
             model = torch.compile(model, mode="reduce-overhead")
