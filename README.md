@@ -1,10 +1,13 @@
-# CNN Image Classification
+# Deep Learning for Image Classification
 
 **Machine Learning Exercise 3.2 - Deep Learning for Image Tasks**
 
 ## Overview
 
-This project implements a Convolutional Neural Network (CNN) for image classification on two benchmark datasets. It is part of a group project comparing different deep learning approaches (CNN, RNN, Traditional ML).
+This project implements multiple deep learning approaches for image classification:
+
+1. **CNN** - Convolutional Neural Network (custom architecture)
+2. **ViT** - Vision Transformer (pretrained from HuggingFace)
 
 ### Datasets
 
@@ -12,6 +15,8 @@ This project implements a Convolutional Neural Network (CNN) for image classific
 |---------|--------|---------|------|----------|
 | **FashionMNIST** | 70,000 | 10 | 28×28 | Grayscale |
 | **CIFAR-10** | 60,000 | 10 | 32×32 | RGB |
+
+Data is loaded using TensorFlow/Keras (matching group members' approach).
 
 ### Metrics
 
@@ -24,18 +29,21 @@ The following metrics are computed (as required by the assignment):
 ## Project Structure
 
 ```
-cnn_project/
-├── cnn.py              # Main CNN implementation
+ml_project/
+├── utils.py            # Timer, compute_metrics, set_seed, constants
+├── data.py             # Data loading (TensorFlow → PyTorch)
+├── plots.py            # Visualization functions
+├── cnn.py              # CNN model and training
+├── vit.py              # Vision Transformer model and training
 ├── main.sh             # Bash script to run all approaches
 ├── requirements.txt    # Python dependencies
 ├── README.md           # This file
 └── outputs/            # Results directory (created at runtime)
     ├── cnn_results_*.json
     ├── cnn_results_*.csv
-    ├── confusion_matrix_*.png
-    ├── training_history_*.png
-    ├── metrics_comparison_*.png
-    └── runtime_comparison_*.png
+    ├── vit_results_*.json
+    ├── vit_results_*.csv
+    └── *.png           # Visualization plots
 ```
 
 ## Installation
@@ -43,7 +51,7 @@ cnn_project/
 ### Prerequisites
 
 - Python 3.8 or higher
-- CUDA-capable GPU (optional, but recommended)
+- CUDA-capable GPU (recommended)
 
 ### Setup
 
@@ -62,25 +70,27 @@ pip install -r requirements.txt
 ```bash
 python -c "import torch; print(f'PyTorch: {torch.__version__}')"
 python -c "import tensorflow as tf; print(f'TensorFlow: {tf.__version__}')"
+python -c "import transformers; print(f'Transformers: {transformers.__version__}')"
 python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
 ```
 
 ## Usage
 
-### Quick Start
+### Run Individual Models
 
 ```bash
-# Single training run
+# CNN
 python cnn.py --dataset fashionmnist
-
-# Grid search for hyperparameter tuning
 python cnn.py --dataset cifar10 --grid-search
-
-# Quick test (dry-run mode)
 python cnn.py --dataset cifar10 --dry-run
+
+# ViT
+python vit.py --dataset fashionmnist
+python vit.py --dataset cifar10 --grid-search
+python vit.py --dataset cifar10 --dry-run
 ```
 
-### Using main.sh (Run All Approaches)
+### Run All Models via main.sh
 
 ```bash
 # Make executable
@@ -101,58 +111,95 @@ chmod +x main.sh
 
 ### Command Line Arguments
 
+Both `cnn.py` and `vit.py` share similar arguments:
+
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--dataset` | fashionmnist | Dataset: `fashionmnist` or `cifar10` |
 | `--grid-search` | False | Enable grid search over hyperparameters |
-| `--dry-run` | False | Quick test with 500 samples, 3 epochs |
-| `--epochs` | 30 | Number of training epochs |
-| `--batch-size` | 64 | Batch size |
-| `--lr` | 0.001 | Learning rate |
-| `--num-filters` | 32 | Number of filters in first conv layer |
-| `--dropout` | 0.5 | Dropout rate |
-| `--no-augment` | False | Disable data augmentation |
+| `--dry-run` | False | Quick test with small data subset |
+| `--epochs` | 30 (CNN) / 50 (ViT) | Number of training epochs |
+| `--batch-size` | 64 (CNN) / 32 (ViT) | Batch size |
+| `--lr` | 1e-3 (CNN) / 2e-5 (ViT) | Learning rate |
 | `--seed` | 42 | Random seed for reproducibility |
 | `--output-dir` | ./outputs | Output directory |
 | `--quiet` | False | Reduce output verbosity |
 | `--no-plots` | False | Skip visualization generation |
 
-## Architecture
+CNN-specific arguments:
+| `--num-filters` | 32 | Number of filters in first conv layer |
+| `--dropout` | 0.5 | Dropout rate |
+| `--no-augment` | False | Disable data augmentation |
 
-### CNN Model
+## Module Descriptions
 
+### utils.py
+
+Contains shared utilities:
+
+```python
+from utils import Timer, timer, compute_metrics, set_seed
+from utils import FASHIONMNIST_CLASSES, CIFAR10_CLASSES
+from utils import CIFAR10_MEAN, CIFAR10_STD, FASHIONMNIST_MEAN, FASHIONMNIST_STD
+
+# Timer usage
+timer.start("training")
+# ... training code ...
+elapsed = timer.stop("training")
+print(timer.format(elapsed))  # "2m 30s"
+
+# Metrics computation
+metrics = compute_metrics(y_true, y_pred, y_prob)
+# Returns: {"accuracy": 0.92, "macro_f1": 0.91, "roc_auc": 0.99}
 ```
-Input (C × H × W)
-    │
-    ├── Conv2d(C, 32, 3×3) + BatchNorm + ReLU + MaxPool(2×2)
-    │
-    ├── Conv2d(32, 64, 3×3) + BatchNorm + ReLU + MaxPool(2×2)
-    │
-    ├── Conv2d(64, 128, 3×3) + BatchNorm + ReLU + MaxPool(2×2)
-    │
-    ├── Flatten
-    │
-    ├── Linear(*, 128) + ReLU + Dropout
-    │
-    └── Linear(128, 10)
-        │
-        Output (10 classes)
+
+### data.py
+
+Data loading functions:
+
+```python
+from data import get_loaders, get_raw_data
+
+# For CNN (returns PyTorch DataLoaders)
+train_loader, val_loader, test_loader, classes = get_loaders(
+    dataset="cifar10",
+    batch_size=64,
+    augment=True,
+    dry_run=False
+)
+
+# For ViT (returns raw numpy arrays)
+(x_train, y_train), (x_val, y_val), (x_test, y_test), classes = get_raw_data(
+    dataset="cifar10",
+    dry_run=False
+)
 ```
 
-### Data Pipeline
+### plots.py
 
-1. **Data Source**: TensorFlow/Keras datasets (matching group members' approach)
-2. **Preprocessing**: Normalization with dataset-specific mean/std
-3. **Augmentation** (training only):
-   - Random horizontal flip
-   - Random crop with padding
-4. **Training**: PyTorch with GPU acceleration (if available)
+Visualization functions:
 
-### Optimizations
+```python
+from plots import (
+    plot_confusion_matrix,
+    plot_training_history,
+    plot_metrics_comparison,
+    plot_runtime_comparison,
+    generate_all_visualizations
+)
 
-- **Mixed Precision Training (AMP)**: ~2x speedup on GPU
-- **torch.compile()**: Additional ~10-30% speedup (PyTorch 2.0+)
-- **Optimized DataLoader**: `pin_memory=True`, `persistent_workers=True`
+# Generate all plots for results
+generate_all_visualizations(
+    results=results,
+    dataset="cifar10",
+    classes=classes,
+    output_dir="./outputs",
+    model_name="cnn",
+    best_y_true=y_true,
+    best_y_pred=y_pred,
+    best_history=history
+)
+```
 
 ## Output Files
 
@@ -160,6 +207,7 @@ Input (C × H × W)
 
 ```json
 {
+  "model": "CNN",
   "dataset": "fashionmnist",
   "timestamp": "20240128_143022",
   "total_script_time_seconds": 245.3,
@@ -187,24 +235,52 @@ Input (C × H × W)
 
 ### CSV Results
 
-| rank | epochs | batch_size | lr | num_filters | dropout | augment | test_accuracy | test_macro_f1 | test_roc_auc | training_time_seconds |
-|------|--------|------------|-----|-------------|---------|---------|---------------|---------------|--------------|----------------------|
-| 1 | 30 | 64 | 0.001 | 64 | 0.3 | True | 0.9234 | 0.9221 | 0.9912 | 45.2 |
-| 2 | 30 | 128 | 0.001 | 64 | 0.5 | True | 0.9198 | 0.9185 | 0.9901 | 38.7 |
-| ... | ... | ... | ... | ... | ... | ... | ... | ... | ... | ... |
+| rank | epochs | batch_size | lr | ... | test_accuracy | test_macro_f1 | test_roc_auc | training_time_seconds |
+|------|--------|------------|-----|-----|---------------|---------------|--------------|----------------------|
+| 1 | 30 | 64 | 0.001 | ... | 0.9234 | 0.9221 | 0.9912 | 45.2 |
 
 ### Visualizations
 
 | File | Description |
 |------|-------------|
-| `confusion_matrix_*.png` | Normalized confusion matrix for best model |
-| `training_history_*.png` | Loss and metrics over epochs |
-| `metrics_comparison_*.png` | Comparison of accuracy, F1, AUC across configurations |
-| `runtime_comparison_*.png` | Training time comparison |
+| `{model}_confusion_matrix_{dataset}.png` | Normalized confusion matrix |
+| `{model}_training_history_{dataset}.png` | Loss/Accuracy/F1 over epochs |
+| `{model}_metrics_comparison_{dataset}.png` | Comparison across configurations |
+| `{model}_runtime_comparison_{dataset}.png` | Training time comparison |
+
+## Model Architectures
+
+### CNN
+
+```
+Input (C × H × W)
+    │
+    ├── Conv2d(C, 32, 3×3) + BatchNorm + ReLU + MaxPool(2×2)
+    │
+    ├── Conv2d(32, 64, 3×3) + BatchNorm + ReLU + MaxPool(2×2)
+    │
+    ├── Conv2d(64, 128, 3×3) + BatchNorm + ReLU + MaxPool(2×2)
+    │
+    ├── Flatten
+    │
+    ├── Linear(*, 128) + ReLU + Dropout
+    │
+    └── Linear(128, 10)
+        │
+        Output (10 classes)
+```
+
+### ViT
+
+Uses pretrained `google/vit-base-patch16-224-in21k` from HuggingFace:
+- Patch size: 16×16
+- Input resolution: 224×224 (images are resized)
+- ~85.8M parameters
+- Fine-tuned classification head
 
 ## Grid Search
 
-Default hyperparameter grid:
+### CNN Grid
 
 ```python
 param_grid = {
@@ -215,37 +291,35 @@ param_grid = {
     "dropout": [0.3, 0.5],
     "augment": [True, False],
 }
-# Total: 2 × 2 × 2 × 2 × 2 = 32 combinations
+# Total: 32 combinations
 ```
 
-To modify, edit the `param_grid` dictionary in `cnn.py` (line ~560).
+### ViT Grid
+
+```python
+param_grid = {
+    "epochs": [50],
+    "batch_size": [16, 32],
+    "lr": [2e-5, 5e-5],
+}
+# Total: 4 combinations
+```
 
 ## Expected Results
 
-### FashionMNIST (30 epochs)
+### FashionMNIST
 
-| Metric | Typical Range |
-|--------|---------------|
-| Accuracy | 0.91 - 0.93 |
-| Macro F1 | 0.91 - 0.93 |
-| ROC-AUC | 0.99+ |
+| Model | Accuracy | Macro F1 | ROC-AUC | Training Time |
+|-------|----------|----------|---------|---------------|
+| CNN | 0.91-0.93 | 0.91-0.93 | 0.99+ | ~2-5 min |
+| ViT | 0.93-0.95 | 0.93-0.95 | 0.99+ | ~10-15 min |
 
-### CIFAR-10 (30 epochs)
+### CIFAR-10
 
-| Metric | Typical Range |
-|--------|---------------|
-| Accuracy | 0.78 - 0.85 |
-| Macro F1 | 0.78 - 0.85 |
-| ROC-AUC | 0.97 - 0.98 |
-
-## Runtime Estimates
-
-| Configuration | FashionMNIST | CIFAR-10 |
-|--------------|--------------|----------|
-| Single run (CPU) | ~10-15 min | ~15-20 min |
-| Single run (GPU) | ~2-3 min | ~3-5 min |
-| Grid search 32 configs (GPU) | ~1-2 hours | ~2-3 hours |
-| Dry-run | ~30 sec | ~30 sec |
+| Model | Accuracy | Macro F1 | ROC-AUC | Training Time |
+|-------|----------|----------|---------|---------------|
+| CNN | 0.78-0.85 | 0.78-0.85 | 0.97-0.98 | ~3-8 min |
+| ViT | 0.95-0.98 | 0.95-0.98 | 0.99+ | ~15-30 min |
 
 ## Troubleshooting
 
@@ -254,17 +328,17 @@ To modify, edit the `param_grid` dictionary in `cnn.py` (line ~560).
 ```bash
 # Reduce batch size
 python cnn.py --batch-size 32
-
-# Or modify grid search to use smaller batches
+python vit.py --batch-size 8
 ```
 
-### TensorFlow/PyTorch Conflict
+### HuggingFace Model Download Issues
 
 ```bash
-# If you get import errors, try:
-pip uninstall tensorflow torch torchvision
-pip install torch torchvision
-pip install tensorflow
+# Set cache directory
+export HF_HOME=/path/to/cache
+
+# Or use offline mode (if model is already cached)
+export TRANSFORMERS_OFFLINE=1
 ```
 
 ### Slow CPU Training
@@ -272,24 +346,8 @@ pip install tensorflow
 ```bash
 # Use dry-run for testing
 python cnn.py --dry-run
-
-# Or reduce epochs
-python cnn.py --epochs 10
+python vit.py --dry-run
 ```
-
-## Integration with Group Project
-
-This script is designed to work alongside other approaches. The `main.sh` script can run all three approaches sequentially:
-
-1. **CNN** (this script): `cnn.py`
-2. **Approach 2**: Add your script (e.g., `rnn.py`)
-3. **Approach 3**: Add your script (e.g., `traditional.py`)
-
-To add another approach:
-
-1. Create your Python script with similar CLI arguments
-2. Edit `main.sh` to include your script
-3. Run `./main.sh` to execute all approaches
 
 ## Report Structure (Suggested)
 
@@ -297,10 +355,10 @@ Based on the group discussion:
 
 1. **Overview of Approaches**
 2. **Metrics / Setup**
-3. **CNN Methodology/Architecture** (this approach)
+3. **CNN Methodology/Architecture**
 4. **CNN Results**
-5. **[Other Approach] Methodology**
-6. **[Other Approach] Results**
+5. **ViT Methodology/Architecture**
+6. **ViT Results**
 7. **Metrics Comparison** (3 Metrics / Confusion Matrix)
 8. **Runtime Comparison**
 9. **Patterns / Analysis**
@@ -311,14 +369,13 @@ Based on the group discussion:
 - Dataset sources:
   - FashionMNIST: Xiao et al., 2017
   - CIFAR-10: Krizhevsky et al., 2009
-- Normalization values: PyTorch community standard
-- Architecture inspired by: VGG, ResNet concepts
+- ViT: Dosovitskiy et al., "An Image is Worth 16x16 Words", 2020
+- HuggingFace Transformers: https://huggingface.co/transformers/
 
 ## Authors
 
 ML Exercise 3.2 Group
 
-- Ben Schill (12347303)
-- Ege Özbaran (12433722)
-- Felix Kapfer (12429669)
+## License
 
+Academic use only - TU Wien Machine Learning Course
