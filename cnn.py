@@ -1,10 +1,20 @@
-# !/usr/bin/env python3
+#!/usr/bin/env python3
+"""
+CNN Image Classification with Grid Search
+
+Datasets: FashionMNIST, CIFAR-10 (loaded via TensorFlow/Keras)
+Metrics: Accuracy, Macro-F1, ROC-AUC
+
+Usage:
+    python cnn.py --dataset fashionmnist
+    python cnn.py --dataset cifar10 --grid-search
+    python cnn.py --dataset cifar10 --dry-run
+"""
 
 
 # Import general libaries
 import csv
 import json
-import time
 import random
 import warnings
 import itertools
@@ -31,288 +41,17 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 
+# Import own classes
+from utils import timer, compute_metrics, set_seed
+from data import get_loaders
+from plots import generate_all_visualizations
+
+
 matplotlib.use('Agg')  # Non-interactive backend
 
 # Remove warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
-
-
-# ============================================================================
-# Set the configs
-# ============================================================================
-FASHIONMNIST_CLASSES = ["T-shirt/top", "Trouser", "Pullover", "Dress", "Coat",
-                        "Sandal", "Shirt", "Sneaker", "Bag", "Ankle boot"]
-CIFAR10_CLASSES = ["airplane", "automobile", "bird", "cat", "deer",
-                   "dog", "frog", "horse", "ship", "truck"]
-
-
-
-
-# ----------------------------------------------------------------------------
-# Data normalization values for CIFAR-10.
-# These mean and std values are empirically computed over the CIFAR-10 training
-# set and are commonly used in the literature and PyTorch community.
-#
-# Source:
-#   - CIFAR-10 dataset
-#     https://pytorch.org/vision/stable/transforms.html
-#     https://www.kaggle.com/code/fanbyprinciple/cifar10-explanation-with-pytorch
-# 
-# Value Used for Normalization:
-#   - https://github.com/pytorch/examples
-#   - https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html
-#   - https://pytorch.org/vision/stable/transforms.html
-#   - https://www.kaggle.com/code/fanbyprinciple/cifar10-explanation-with-pytorch
-# 
-#
-# The values are not computed here but reused as standard reference statistics
-# in the function get_loaders
-# ----------------------------------------------------------------------------
-CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
-CIFAR10_STD  = (0.2470, 0.2435, 0.2616)
-
-FASHIONMNIST_MEAN = (0.2860,)
-FASHIONMNIST_STD  = (0.3530,)
-
-
-# ============================================================================
-# TIMING UTILITIES
-# ============================================================================
-
-class Timer:
-    """Simple timer for measuring execution time."""
-    
-    def __init__(self):
-        self.times = {}
-        self.start_times = {}
-    
-    def start(self, name):
-        """Start a named timer."""
-        self.start_times[name] = time.time()
-    
-    def stop(self, name):
-        """Stop a named timer and record elapsed time."""
-        if name in self.start_times:
-            elapsed = time.time() - self.start_times[name]
-            self.times[name] = elapsed
-            return elapsed
-        return 0
-    
-    def get(self, name):
-        """Get elapsed time for a named timer."""
-        return self.times.get(name, 0)
-    
-    def get_all(self):
-        """Get all recorded times."""
-        return self.times.copy()
-    
-    def format(self, seconds):
-        """Format seconds to human-readable string."""
-        if seconds < 60:
-            return f"{seconds:.1f}s"
-        elif seconds < 3600:
-            mins = int(seconds // 60)
-            secs = int(seconds % 60)
-            return f"{mins}m {secs}s"
-        else:
-            hours = int(seconds // 3600)
-            mins = int((seconds % 3600) // 60)
-            return f"{hours}h {mins}m"
-
-
-# Global timer instance
-timer = Timer()
-
-
-
-
-
-# ============================================================================
-# Helper function to calculate the metrics
-# ============================================================================
-def compute_metrics(y_true, y_pred, y_prob=None):
-    """
-    Compute all metrics.
-    """
-
-    metrics = {
-        "accuracy": accuracy_score(y_true, y_pred),
-        "macro_f1": f1_score(y_true, y_pred, average="macro", zero_division=0),
-    }
-    if y_prob is not None:
-        try:
-            metrics["roc_auc"] = roc_auc_score(y_true, y_prob, multi_class="ovr", average="macro")
-        except ValueError:
-            metrics["roc_auc"] = float("nan")
-    else:
-        metrics["roc_auc"] = float("nan")
-    return metrics
-
-
-
-
-    
-# ============================================================================
-# DATA LOADING (TensorFlow/Keras)
-# ============================================================================
-
-def load_tensorflow_data(dataset):
-    """
-    Load data using TensorFlow/Keras datasets.
-    
-    This matches the approach used by group members:
-        (x_train, y_train), (x_test, y_test) = datasets.cifar10.load_data()
-        (x_train, y_train), (x_test, y_test) = datasets.fashion_mnist.load_data()
-    
-    Returns numpy arrays.
-
-    """
-    if dataset == "fashionmnist":
-        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.fashion_mnist.load_data()
-        classes = FASHIONMNIST_CLASSES
-        # Add channel dimension: (N, 28, 28) -> (N, 28, 28, 1)
-        x_train = x_train[..., np.newaxis]
-        x_test = x_test[..., np.newaxis]
-    elif dataset == "cifar10":
-        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
-        classes = CIFAR10_CLASSES
-        # y comes as (N, 1), flatten to (N,)
-        y_train = y_train.flatten()
-        y_test = y_test.flatten()
-    else:
-        raise ValueError(f"Unknown dataset: {dataset}")
-    
-    # Normalize to [0, 1]
-    x_train = x_train.astype(np.float32) / 255.0
-    x_test = x_test.astype(np.float32) / 255.0
-    
-    return (x_train, y_train), (x_test, y_test), classes
-
-
-def normalize_data(x, mean, std):
-    """Apply channel-wise normalization."""
-    mean = np.array(mean).reshape(1, 1, 1, -1)
-    std = np.array(std).reshape(1, 1, 1, -1)
-    return (x - mean) / std
-
-
-def apply_augmentation(x, dataset):
-    """
-    Apply simple data augmentation (random flip, random crop).
-    Works on numpy arrays.
-    """
-    augmented = []
-    pad = 4
-    
-    for img in x:
-        # Random horizontal flip
-        if random.random() > 0.5:
-            img = np.flip(img, axis=1)
-        
-        # Random crop with padding
-        if dataset == "fashionmnist":
-            h, w = 28, 28
-        else:
-            h, w = 32, 32
-        
-        # Pad image
-        if len(img.shape) == 3:
-            padded = np.pad(img, ((pad, pad), (pad, pad), (0, 0)), mode='reflect')
-        else:
-            padded = np.pad(img, ((pad, pad), (pad, pad)), mode='reflect')
-        
-        # Random crop
-        start_h = random.randint(0, 2 * pad)
-        start_w = random.randint(0, 2 * pad)
-        img = padded[start_h:start_h+h, start_w:start_w+w]
-        
-        augmented.append(img)
-    
-    return np.array(augmented)
-
-
-def get_loaders(dataset, batch_size=64, augment=True, val_split=0.1, seed=42,
-                dry_run=False, num_workers=4):
-    """
-    Load dataset using TensorFlow/Keras and create PyTorch DataLoaders.
-    
-    Data source: TensorFlow/Keras datasets (matching group members' approach)
-    Training: PyTorch (for GPU acceleration and model compatibility)
-    """
-    
-    # Load data via TensorFlow
-    (x_train, y_train), (x_test, y_test), classes = load_tensorflow_data(dataset)
-    
-    # Get normalization values
-    if dataset == "fashionmnist":
-        mean, std = FASHIONMNIST_MEAN, FASHIONMNIST_STD
-    else:
-        mean, std = CIFAR10_MEAN, CIFAR10_STD
-    
-    # Dry-run mode: use small subset
-    if dry_run:
-        np.random.seed(seed)
-        train_idx = np.random.permutation(len(x_train))[:500]
-        test_idx = np.random.permutation(len(x_test))[:100]
-        x_train, y_train = x_train[train_idx], y_train[train_idx]
-        x_test, y_test = x_test[test_idx], y_test[test_idx]
-        print(f"[DRY-RUN] Train: {len(x_train)}, Test: {len(x_test)}")
-    
-    # Train/Val split
-    np.random.seed(seed)
-    n_val = int(len(x_train) * val_split)
-    indices = np.random.permutation(len(x_train))
-    val_idx, train_idx = indices[:n_val], indices[n_val:]
-    
-    x_val, y_val = x_train[val_idx], y_train[val_idx]
-    x_train, y_train = x_train[train_idx], y_train[train_idx]
-    
-    # Apply augmentation to training data
-    if augment:
-        x_train = apply_augmentation(x_train, dataset)
-    
-    # Normalize all data
-    x_train = normalize_data(x_train, mean, std)
-    x_val = normalize_data(x_val, mean, std)
-    x_test = normalize_data(x_test, mean, std)
-    
-    # Convert to PyTorch format: (N, H, W, C) -> (N, C, H, W)
-    x_train = np.transpose(x_train, (0, 3, 1, 2))
-    x_val = np.transpose(x_val, (0, 3, 1, 2))
-    x_test = np.transpose(x_test, (0, 3, 1, 2))
-    
-    # Create PyTorch datasets
-    train_dataset = TensorDataset(
-        torch.from_numpy(x_train).float(),
-        torch.from_numpy(y_train).long()
-    )
-    val_dataset = TensorDataset(
-        torch.from_numpy(x_val).float(),
-        torch.from_numpy(y_val).long()
-    )
-    test_dataset = TensorDataset(
-        torch.from_numpy(x_test).float(),
-        torch.from_numpy(y_test).long()
-    )
-    
-    # DataLoader settings
-    use_cuda = torch.cuda.is_available()
-    loader_kwargs = {
-        "num_workers": num_workers if use_cuda else 0,
-        "pin_memory": use_cuda,
-        "persistent_workers": num_workers > 0 and use_cuda,
-    }
-    
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, **loader_kwargs)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size * 2, shuffle=False, **loader_kwargs)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size * 2, shuffle=False, **loader_kwargs)
-    
-    if not dry_run:
-        print(f"[DATA] Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}")
-    
-    return train_loader, val_loader, test_loader, classes
-
 
 # ============================================================================
 # MODEL
@@ -520,175 +259,8 @@ def train_model(model, train_loader, val_loader, epochs=30, lr=1e-3,
 
 
 # ============================================================================
-# VISUALIZATION
-# ============================================================================
-
-def plot_confusion_matrix(y_true, y_pred, classes, save_path, title="Confusion Matrix"):
-    """Plot and save confusion matrix."""
-    cm = confusion_matrix(y_true, y_pred)
-    cm_normalized = cm.astype('float') / cm.sum(axis=1, keepdims=True)
-    
-    fig, ax = plt.subplots(figsize=(10, 8))
-    sns.heatmap(cm_normalized, annot=True, fmt='.2%', cmap='Blues',
-                xticklabels=classes, yticklabels=classes, ax=ax)
-    ax.set_xlabel('Predicted Label', fontsize=12)
-    ax.set_ylabel('True Label', fontsize=12)
-    ax.set_title(title, fontsize=14, fontweight='bold')
-    plt.xticks(rotation=45, ha='right')
-    plt.yticks(rotation=0)
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f"[PLOT] Confusion matrix saved: {save_path}")
-
-
-def plot_training_history(history, save_path):
-    """Plot training history (loss and metrics)."""
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-    
-    epochs = [h['epoch'] for h in history]
-    
-    # Loss
-    axes[0].plot(epochs, [h['train_loss'] for h in history], 'b-', label='Train Loss')
-    axes[0].plot(epochs, [h['val_loss'] for h in history], 'r-', label='Val Loss')
-    axes[0].set_xlabel('Epoch')
-    axes[0].set_ylabel('Loss')
-    axes[0].set_title('Training & Validation Loss')
-    axes[0].legend()
-    axes[0].grid(True, alpha=0.3)
-    
-    # Accuracy
-    axes[1].plot(epochs, [h['val_accuracy'] for h in history], 'g-', label='Val Accuracy')
-    axes[1].set_xlabel('Epoch')
-    axes[1].set_ylabel('Accuracy')
-    axes[1].set_title('Validation Accuracy')
-    axes[1].legend()
-    axes[1].grid(True, alpha=0.3)
-    
-    # F1 Score
-    axes[2].plot(epochs, [h['val_macro_f1'] for h in history], 'm-', label='Val Macro-F1')
-    axes[2].set_xlabel('Epoch')
-    axes[2].set_ylabel('Macro F1')
-    axes[2].set_title('Validation Macro F1')
-    axes[2].legend()
-    axes[2].grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f"[PLOT] Training history saved: {save_path}")
-
-
-def plot_metrics_comparison(results, save_path):
-    """Plot metrics comparison across different configurations."""
-    if len(results) < 2:
-        return
-    
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    
-    # Prepare data
-    labels = [f"#{i+1}" for i in range(min(10, len(results)))]
-    results_subset = results[:10]
-    
-    metrics = ['accuracy', 'macro_f1', 'roc_auc']
-    titles = ['Accuracy', 'Macro F1', 'ROC-AUC']
-    colors = ['steelblue', 'forestgreen', 'coral']
-    
-    for idx, (metric, title, color) in enumerate(zip(metrics, titles, colors)):
-        values = [r['test_metrics'][metric] for r in results_subset]
-        bars = axes[idx].bar(labels, values, color=color, edgecolor='black', alpha=0.8)
-        axes[idx].set_xlabel('Configuration Rank')
-        axes[idx].set_ylabel(title)
-        axes[idx].set_title(f'Test {title} Comparison')
-        axes[idx].set_ylim(min(values) * 0.95, max(values) * 1.02)
-        axes[idx].grid(True, axis='y', alpha=0.3)
-        
-        # Add value labels on bars
-        for bar, val in zip(bars, values):
-            axes[idx].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.005,
-                          f'{val:.3f}', ha='center', va='bottom', fontsize=8)
-    
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f"[PLOT] Metrics comparison saved: {save_path}")
-
-
-def plot_runtime_comparison(results, save_path):
-    """Plot runtime comparison across configurations."""
-    if len(results) < 2:
-        return
-    
-    fig, ax = plt.subplots(figsize=(10, 5))
-    
-    labels = [f"#{i+1}" for i in range(min(10, len(results)))]
-    results_subset = results[:10]
-    
-    times = [r.get('training_time', 0) for r in results_subset]
-    
-    bars = ax.bar(labels, times, color='teal', edgecolor='black', alpha=0.8)
-    ax.set_xlabel('Configuration Rank')
-    ax.set_ylabel('Training Time (seconds)')
-    ax.set_title('Training Runtime Comparison')
-    ax.grid(True, axis='y', alpha=0.3)
-    
-    # Add value labels
-    for bar, t in zip(bars, times):
-        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
-               f'{t:.1f}s', ha='center', va='bottom', fontsize=9)
-    
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f"[PLOT] Runtime comparison saved: {save_path}")
-
-
-def generate_all_visualizations(results, dataset, classes, output_dir, 
-                                 best_y_true=None, best_y_pred=None, best_history=None):
-    """Generate all visualization plots."""
-    output_dir = Path(output_dir)
-    
-    # Confusion matrix for best model
-    if best_y_true is not None and best_y_pred is not None:
-        plot_confusion_matrix(
-            best_y_true, best_y_pred, classes,
-            output_dir / f"confusion_matrix_{dataset}.png",
-            title=f"Confusion Matrix - {dataset.upper()} (Best Model)"
-        )
-    
-    # Training history for best model
-    if best_history is not None:
-        plot_training_history(
-            best_history,
-            output_dir / f"training_history_{dataset}.png"
-        )
-    
-    # Metrics comparison (if grid search)
-    if len(results) > 1:
-        plot_metrics_comparison(
-            results,
-            output_dir / f"metrics_comparison_{dataset}.png"
-        )
-        
-        plot_runtime_comparison(
-            results,
-            output_dir / f"runtime_comparison_{dataset}.png"
-        )
-
-
-# ============================================================================
 # EXPERIMENT RUNNER
 # ============================================================================
-
-def set_seed(seed=42):
-    """Set seeds for reproducibility."""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
-
 
 def run_experiment(dataset, params, device, dry_run=False, verbose=True):
     """Run a single experiment."""
@@ -793,6 +365,7 @@ def save_results(results, dataset, output_dir="./outputs", dry_run=False, total_
     
     # JSON export
     json_data = {
+        "model": "CNN",
         "dataset": dataset,
         "timestamp": timestamp,
         "dry_run": dry_run,
@@ -964,6 +537,7 @@ def main():
             dataset=args.dataset,
             classes=best_result["classes"],
             output_dir=args.output_dir,
+            model_name="cnn",
             best_y_true=best_result.get("y_true"),
             best_y_pred=best_result.get("y_pred"),
             best_history=best_result.get("history")
