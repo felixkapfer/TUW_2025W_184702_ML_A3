@@ -101,38 +101,53 @@ def plot_training_history(history, save_path):
 def plot_metrics_comparison(results, save_path):
     """
     Plot metrics comparison across different configurations.
-    
+
     Args:
         results: List of result dictionaries
         save_path: Path to save the plot
     """
     if len(results) < 2:
         return
-    
+
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    
+
     # Prepare data
     labels = [f"#{i+1}" for i in range(min(10, len(results)))]
     results_subset = results[:10]
-    
+
     metrics = ['accuracy', 'macro_f1', 'roc_auc']
     titles = ['Accuracy', 'Macro F1', 'ROC-AUC']
     colors = ['steelblue', 'forestgreen', 'coral']
-    
+
     for idx, (metric, title, color) in enumerate(zip(metrics, titles, colors)):
-        values = [r['test_metrics'][metric] for r in results_subset]
+        values = [r["test_metrics"][metric] for r in results_subset]
+
+        finite = [v for v in values if np.isfinite(v)]
+        if len(finite) == 0:
+            y_min, y_max = 0.0, 1.0
+        else:
+            y_min, y_max = min(finite) * 0.95, max(finite) * 1.02
+
         bars = axes[idx].bar(labels, values, color=color, edgecolor='black', alpha=0.8)
         axes[idx].set_xlabel('Configuration Rank')
         axes[idx].set_ylabel(title)
         axes[idx].set_title(f'Test {title} Comparison')
-        axes[idx].set_ylim(min(values) * 0.95, max(values) * 1.02)
+        axes[idx].set_ylim(y_min, y_max)
         axes[idx].grid(True, axis='y', alpha=0.3)
-        
-        # Add value labels on bars
+
+        # Add value labels on bars (skip NaN/Inf)
         for bar, val in zip(bars, values):
-            axes[idx].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.005,
-                          f'{val:.3f}', ha='center', va='bottom', fontsize=8)
-    
+            if not np.isfinite(val):
+                continue
+            axes[idx].text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.005,
+                f'{val:.3f}',
+                ha='center',
+                va='bottom',
+                fontsize=8
+            )
+
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
