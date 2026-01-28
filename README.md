@@ -182,7 +182,7 @@ Shallow learning with traditional ML:
 ```python
 from shallow import run_shallow_task
 
-# Run with best parameters (fastest)
+# Run with best parameters
 results = run_shallow_task(
     dataset_name="cifar",
     use_best_params=True
@@ -302,20 +302,13 @@ generate_all_visualizations(
 
 ```
 Input (C × H × W)
-    │
     ├── Conv2d(C, 32, 3×3) + BatchNorm + ReLU + MaxPool(2×2)
-    │
     ├── Conv2d(32, 64, 3×3) + BatchNorm + ReLU + MaxPool(2×2)
-    │
     ├── Conv2d(64, 128, 3×3) + BatchNorm + ReLU + MaxPool(2×2)
-    │
     ├── Flatten
-    │
     ├── Linear(*, 128) + ReLU + Dropout
-    │
     └── Linear(128, 10)
-        │
-        Output (10 classes)
+        ├──Output (10 classes)
 ```
 
 ### ViT
@@ -405,21 +398,6 @@ python cnn.py --dry-run
 python vit.py --dry-run
 ```
 
-## Report Structure (Suggested)
-
-Based on the group discussion:
-
-1. **Overview of Approaches**
-2. **Metrics / Setup**
-3. **CNN Methodology/Architecture**
-4. **CNN Results**
-5. **ViT Methodology/Architecture**
-6. **ViT Results**
-7. **Metrics Comparison** (3 Metrics / Confusion Matrix)
-8. **Runtime Comparison**
-9. **Patterns / Analysis**
-10. **Best Choice / Conclusion**
-
 ## References
 
 - Dataset sources:
@@ -432,6 +410,6 @@ Based on the group discussion:
 
 ML Exercise 3.2 Group
 
-## License
-
-Academic use only - TU Wien Machine Learning Course
+- Ben Schill (12347303)
+- Ege Özbaran (12433722)
+- Felix Kapfer (12429669)
