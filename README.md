@@ -4,10 +4,11 @@
 
 ## Overview
 
-This project implements multiple deep learning approaches for image classification:
+This project implements multiple machine learning approaches for image classification:
 
-1. **CNN** - Convolutional Neural Network (custom architecture)
-2. **ViT** - Vision Transformer (pretrained from HuggingFace)
+1. **Shallow Learning** - SVM and Random Forest with traditional feature extraction
+2. **CNN** - Convolutional Neural Network (custom architecture)
+3. **ViT** - Vision Transformer (pretrained from HuggingFace)
 
 ### Datasets
 
@@ -33,12 +34,15 @@ ml_project/
 ├── utils.py            # Timer, compute_metrics, set_seed, constants
 ├── data.py             # Data loading (TensorFlow → PyTorch)
 ├── plots.py            # Visualization functions
+├── shallow.py          # Shallow learning (SVM, Random Forest)
 ├── cnn.py              # CNN model and training
 ├── vit.py              # Vision Transformer model and training
 ├── main.sh             # Bash script to run all approaches
 ├── requirements.txt    # Python dependencies
 ├── README.md           # This file
 └── outputs/            # Results directory (created at runtime)
+    ├── shallow_results_*.json
+    ├── confusion_matrices_*.txt/json
     ├── cnn_results_*.json
     ├── cnn_results_*.csv
     ├── vit_results_*.json
@@ -79,6 +83,11 @@ python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
 ### Run Individual Models
 
 ```bash
+# Shallow Learning (SVM + Random Forest)
+python shallow.py --dataset fashion --best
+python shallow.py --dataset cifar --max-samples 10000
+python shallow.py --dataset fashion --vocab-size 300
+
 # CNN
 python cnn.py --dataset fashionmnist
 python cnn.py --dataset cifar10 --grid-search
@@ -111,7 +120,20 @@ chmod +x main.sh
 
 ### Command Line Arguments
 
-Both `cnn.py` and `vit.py` share similar arguments:
+**shallow.py** arguments:
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--dataset` | (required) | Dataset: `fashion` or `cifar` |
+| `--best` | False | Use pre-optimized parameters (skip GridSearch) |
+| `--max-samples` | None | Tune on N samples, train on full dataset |
+| `--vocab-size` | 200 | Size of visual vocabulary for ORB+BoW |
+| `--svm-c` | None | Manual override: SVM C parameter |
+| `--svm-gamma` | None | Manual override: SVM gamma parameter |
+| `--rf-n-estimators` | None | Manual override: Random Forest n_estimators |
+| `--rf-max-depth` | None | Manual override: Random Forest max_depth |
+
+**cnn.py** and **vit.py** share similar arguments:
 
 | Argument | Default | Description |
 |----------|---------|-------------|
@@ -152,6 +174,32 @@ print(timer.format(elapsed))  # "2m 30s"
 metrics = compute_metrics(y_true, y_pred, y_prob)
 # Returns: {"accuracy": 0.92, "macro_f1": 0.91, "roc_auc": 0.99}
 ```
+
+### shallow.py
+
+Shallow learning with traditional ML:
+
+```python
+from shallow import run_shallow_task
+
+# Run with best parameters (fastest)
+results = run_shallow_task(
+    dataset_name="cifar",
+    use_best_params=True
+)
+
+# Run with grid search
+results = run_shallow_task(
+    dataset_name="fashion",
+    max_samples=10000,  # Tune on 10k, train on full
+    vocab_size=200
+)
+```
+
+Implements:
+- **Feature extraction**: 3-channel color histograms and ORB+BoW
+- **Models**: SVM (RBF kernel) and Random Forest
+- **Metrics**: Accuracy, Macro F1, AUC-ROC per experiment
 
 ### data.py
 
@@ -311,6 +359,10 @@ param_grid = {
 
 | Model | Accuracy | Macro F1 | ROC-AUC | Training Time |
 |-------|----------|----------|---------|---------------|
+| SVM (Histogram) | 0.84-0.87 | 0.84-0.87 | 0.97-0.98 | ~1-3 min |
+| RF (Histogram) | 0.85-0.88 | 0.85-0.88 | 0.98-0.99 | ~1-2 min |
+| SVM (ORB+BoW) | 0.82-0.85 | 0.82-0.85 | 0.96-0.97 | ~2-4 min |
+| RF (ORB+BoW) | 0.83-0.86 | 0.83-0.86 | 0.97-0.98 | ~1-3 min |
 | CNN | 0.91-0.93 | 0.91-0.93 | 0.99+ | ~2-5 min |
 | ViT | 0.93-0.95 | 0.93-0.95 | 0.99+ | ~10-15 min |
 
@@ -318,6 +370,10 @@ param_grid = {
 
 | Model | Accuracy | Macro F1 | ROC-AUC | Training Time |
 |-------|----------|----------|---------|---------------|
+| SVM (Histogram) | 0.35-0.42 | 0.35-0.42 | 0.75-0.82 | ~3-6 min |
+| RF (Histogram) | 0.38-0.45 | 0.38-0.45 | 0.78-0.85 | ~2-4 min |
+| SVM (ORB+BoW) | 0.28-0.35 | 0.28-0.35 | 0.68-0.75 | ~4-8 min |
+| RF (ORB+BoW) | 0.30-0.37 | 0.30-0.37 | 0.70-0.77 | ~2-5 min |
 | CNN | 0.78-0.85 | 0.78-0.85 | 0.97-0.98 | ~3-8 min |
 | ViT | 0.95-0.98 | 0.95-0.98 | 0.99+ | ~15-30 min |
 
